@@ -23,42 +23,39 @@ def filtered_gene_types():
   selected_gene_types.remove('miRNA')
   return selected_gene_types
 
-
+def expression_data():
+   data = pd.read_csv('../data/data.csv')
+   data = data.T
+   data = data.drop(data.index[:3])
+   return data
+   
 def plt_PCA(data):
   '''PCA'''
-  # Separate gene ID and gene name columns
-  gene_info = data[['gene_id', 'gene_name', 'gene_type']]
-  # Select only the expression data columns for PCA
-  expression_data = data.drop(['gene_id', 'gene_name', 'gene_type'], axis=1)
-
-  # Standardize the data
+  # Standardize the gene expression data (mean=0 and variance=1)
   scaler = StandardScaler()
-  scaled_data = scaler.fit_transform(expression_data)
+  scaled_data = scaler.fit_transform(data)
 
   # Apply PCA
-  pca = PCA(n_components=2)  # You can change the number of components as needed
-  principal_components = pca.fit_transform(scaled_data)
+  pca = PCA(n_components=2)  # Number of components for visualization (2 for 2D plot)
+  pca_result = pca.fit_transform(scaled_data)
 
-  # Create a DataFrame for the principal components
-  principal_df = pd.DataFrame(data=principal_components, columns=['PC1', 'PC2'])
+  # Create a DataFrame from PCA result for easy plotting
+  pca_df = pd.DataFrame(data=pca_result, columns=['PC1', 'PC2'])  # Change column names accordingly
 
-  # Concatenate the principal components DataFrame with the gene info
-  result = pd.concat([gene_info, principal_df], axis=1)
-
-  # Visualize the PCA results
+  # Plot PCA results
   plt.figure(figsize=(8, 6))
-  plt.scatter(result['PC1'], result['PC2'], alpha=0.5)
+  plt.scatter(pca_df['PC1'], pca_df['PC2'], alpha=0.5)
   plt.xlabel('Principal Component 1')
   plt.ylabel('Principal Component 2')
-  plt.title('PCA of Gene Type: ')
-
-  plt.xlim(0,100)
-  plt.ylim(-50,50)
+  plt.title('PCA Plot of Gene Expression Data')
+  plt.grid(True)
+  plt.ylim(-25,25)
+  plt.xlim(-25,25)
   plt.show()
 
 def plt_tsne(data):
   '''TSNE'''
-  selected_columns = data.iloc[:, 3:]  
+  selected_columns = data 
 
   tsne = TSNE(n_components=2, perplexity=30)  # Adjust parameters as needed
 
@@ -77,7 +74,7 @@ def plt_tsne(data):
   plt.show()
 
 def plt_ICA(data):
-  gene_expression = data.iloc[:, 3:]  
+  gene_expression = data 
 
   # Assuming you have your data loaded into a variable named 'data'
   # Replace this with your actual data loading process
@@ -105,6 +102,7 @@ def plt_VAE(data):
 
     # Normalize the data
     expression_data = (expression_data - np.min(expression_data)) / (np.max(expression_data) - np.min(expression_data))
+    expression_data = tf.convert_to_tensor(expression_data, dtype=tf.float32)
 
     # Define the VAE architecture
     latent_dim = 2  # Set the number of latent dimensions
@@ -208,3 +206,84 @@ def plt_pca_variance(data):
   plt.title('Cumulative Explained Variance by Principal Components')
   plt.grid(True)
   plt.show()
+
+
+
+def pca(data):
+    '''PCA'''
+    # Select only the expression data columns for PCA
+    expression_data = data
+
+    # Standardize the data
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(expression_data)
+
+    # Apply PCA
+    pca = PCA(n_components=2)  # You can change the number of components as needed
+    principal_components = pca.fit_transform(scaled_data)
+    return principal_components
+
+def tsne(data):
+    selected_columns = data
+    tsne = TSNE(n_components=2, perplexity=30)  # Adjust parameters as needed
+
+    # Perform t-SNE
+    tsne_result = tsne.fit_transform(selected_columns)
+
+def Umap(data):
+    selected_columns = data  
+    umap_reducer = umap.UMAP(n_components=2)  
+
+    umap_result = umap_reducer.fit_transform(selected_columns)
+    return umap_results
+
+def ica(data):
+    gene_expression = data
+    ica = FastICA(n_components=2, random_state=42)
+
+
+    ica.fit(gene_expression)
+
+    independent_components = ica.transform(gene_expression)
+    return independent_components
+
+def vae(data):
+    expression_data = data.values
+
+
+    expression_data = (expression_data - np.min(expression_data)) / (np.max(expression_data) - np.min(expression_data))
+    expression_data = tf.convert_to_tensor(expression_data, dtype=tf.float32)
+    latent_dim = 2 
+
+    encoder_inputs = keras.Input(shape=(expression_data.shape[1],))
+    x = keras.layers.Dense(256, activation='relu')(encoder_inputs)
+    x = keras.layers.Dense(128, activation='relu')(x)
+    z_mean = keras.layers.Dense(latent_dim, name='z_mean')(x)
+    z_log_var = keras.layers.Dense(latent_dim, name='z_log_var')(x)
+
+    def sampling(args):
+        z_mean, z_log_var = args
+        epsilon = tf.keras.backend.random_normal(shape=(tf.shape(z_mean)[0], latent_dim), mean=0., stddev=1.)
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+
+    z = keras.layers.Lambda(sampling, output_shape=(latent_dim,))([z_mean, z_log_var])
+
+    decoder_inputs = keras.layers.Dense(128, activation='relu')(z)
+    decoder_outputs = keras.layers.Dense(expression_data.shape[1], activation='sigmoid')(decoder_inputs)
+
+    vae = keras.Model(encoder_inputs, decoder_outputs)
+
+    reconstruction_loss = tf.keras.losses.mean_squared_error(encoder_inputs, decoder_outputs)
+    reconstruction_loss *= expression_data.shape[1]
+    kl_loss = 1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var)
+    kl_loss = tf.reduce_mean(kl_loss)
+    kl_loss *= -0.5
+    vae_loss = tf.reduce_mean(reconstruction_loss + kl_loss)
+    vae.add_loss(vae_loss)
+    vae.compile(optimizer='adam')
+
+    vae.fit(expression_data, epochs=50, batch_size=32)
+
+    encoder = keras.Model(encoder_inputs, z_mean)
+    encoded_data = encoder.predict(expression_data)
+    return encoded_data
